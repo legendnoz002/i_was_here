@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert' as convert;
 import 'package:image_cropper/image_cropper.dart';
 
+
 class Register2 extends StatefulWidget {
   final String username, password, firstname, lastname;
   const Register2(this.username, this.password, this.firstname, this.lastname);
@@ -106,6 +107,8 @@ class _Register2State extends State<Register2> {
 
   process() async {
     setState(() {
+      _textColor = Colors.black;
+      _color = Colors.white;
       _isLoading = true;
     });
     var response;
@@ -186,7 +189,7 @@ class _Register2State extends State<Register2> {
         resizeToAvoidBottomPadding: false,
         appBar: AppBar(
           centerTitle: true,
-          title: Text('Choose your image',
+          title: Text('Choose your face',
               style: TextStyle(
                   color: Colors.black,
                   fontSize: fs,
@@ -209,7 +212,7 @@ class _Register2State extends State<Register2> {
                 },
                 child: Container(
                   width: size.width,
-                  height: screenHeight * 0.5,
+                  height: screenHeight * 0.4,
                   decoration: BoxDecoration(
                     image: DecorationImage(
                       fit: BoxFit.fill,

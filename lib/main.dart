@@ -3,19 +3,19 @@ import 'package:lmao/pages/activity.dart';
 import 'package:lmao/pages/login.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
+import 'package:lmao/pages/date.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SharedPreferences sharedPreferences = await SharedPreferences.getInstance();
   bool isLogged = (sharedPreferences.getBool('isLogged') ?? false);
 
-  sharedPreferences.setString("url", "https://cbe78bd25761.ngrok.io/");
+  sharedPreferences.setString("url", "https://06b107a68b35.ngrok.io/");
 
   var home;
   if (isLogged) {
     home = Activity();
-    print("this is token");
-    print(sharedPreferences.getString('token'));
+    
   } else {
     home = Login();
   }

@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:lmao/models/log_models.dart';
 import 'package:barcode_scan/barcode_scan.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:image_picker/image_picker.dart';
@@ -17,28 +16,63 @@ import 'package:lmao/pages/customDialog.dart';
 import 'package:lmao/custom/my_flutter_app_icons.dart';
 
 class Activity extends StatefulWidget {
+  final TextEditingController controller = new TextEditingController();
   @override
   _ActivityState createState() => _ActivityState();
 }
 
 class _ActivityState extends State<Activity> {
+  final StreamController<dynamic> _streamController =
+      StreamController<dynamic>.broadcast();
+
   SharedPreferences sharedPreferences;
-  String barcode;
-  String eventName;
-  String fetchURL,
+  String barcode,
+      fetchURL,
       joinURL,
       scanURL,
-      imgURL,
       verifiedURL,
+      secretKey,
       _user = "",
       _firstname = "",
       _lastname = "";
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey();
+  static final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey();
   var _jsonData, now;
   File galleryFile;
   List events = [];
-  bool _isLoading = false, _update = false, _status = false, _flag = false;
+  bool _update = false, _status = false;
   Image image = null;
+
+  _loadFetchUrl() async {
+    sharedPreferences = await SharedPreferences.getInstance();
+    joinURL = sharedPreferences.getString("url") + "join_event";
+    scanURL = sharedPreferences.getString("url") + "read_qr";
+    verifiedURL = sharedPreferences.getString("url") + "verified";
+  }
+
+  Future _loadPost() async {
+    var _jsonResponse;
+    sharedPreferences = await SharedPreferences.getInstance();
+    fetchURL = sharedPreferences.getString("url") + "get_event/" + _user;
+    while (!_streamController.isClosed) {
+      http.Response response = await http
+          .get(fetchURL, headers: {"Content-Type": "application/json"});
+      _jsonResponse = json.decode(response.body);
+
+      if (_jsonResponse.length != 0) {
+        if (_jsonResponse[0]['verified'] && !_status) {
+          setState(() {
+            _status = true;
+          });
+        }
+      }
+      if (!_streamController.isClosed) {
+        _streamController.add(_jsonResponse);
+      }
+
+      await Future.delayed(Duration(seconds: 5));
+    }
+    print('loop has stop');
+  }
 
   _selectFileFromCamera() async {
     final _file = await ImagePicker.pickImage(source: ImageSource.camera);
@@ -50,30 +84,7 @@ class _ActivityState extends State<Activity> {
     }
   }
 
-  _loadFetchUrl() async {
-    sharedPreferences = await SharedPreferences.getInstance();
-    fetchURL = sharedPreferences.getString("url") + "get_event";
-    joinURL = sharedPreferences.getString("url") + "join_event";
-    scanURL = sharedPreferences.getString("url") + "read_qr";
-    verifiedURL = sharedPreferences.getString("url") + "verified";
-  }
-
-  _loadImg() {
-    now = DateTime.now();
-    String url = imgURL +
-        "profile_image/" +
-        _user +
-        "?v=" +
-        now.millisecondsSinceEpoch.toString();
-    setState(() {
-      image = Image.network(
-        url,
-      );
-    });
-  }
-
   Future<http.Response> _joinEvent(File image) async {
-    _isLoading = true;
     final mimeTypeData =
         lookupMimeType(image.path, headerBytes: [0xFF, 0xD8]).split('/');
     final imageUploadRequest =
@@ -84,7 +95,7 @@ class _ActivityState extends State<Activity> {
     imageUploadRequest.files.add(file);
     imageUploadRequest.fields['username'] =
         sharedPreferences.getString("loggedUser");
-    imageUploadRequest.fields['eventKey'] = barcode;
+    imageUploadRequest.fields['eventKey'] = secretKey;
     imageUploadRequest.fields['ext'] = mimeTypeData[1];
 
     final streamResponse = await imageUploadRequest.send();
@@ -99,9 +110,6 @@ class _ActivityState extends State<Activity> {
     await _selectFileFromCamera();
     try {
       response = await _joinEvent(galleryFile);
-      setState(() {
-        _isLoading = false;
-      });
     } catch (e) {
       connected = false;
       print(e);
@@ -126,40 +134,16 @@ class _ActivityState extends State<Activity> {
     }
   }
 
-  Stream<List> fetchPost() async* {
-    var payload = {"username": _user};
-    while (true) {
-      await Future.delayed(Duration(seconds: 7));
-      http.Response response = await http.post(fetchURL,
-          body: jsonEncode(payload),
-          headers: {"Content-Type": "application/json"});
-      events.clear();
-      _jsonData = json.decode(response.body);
-      if (_update) {
-        _loadImg();
-        _update = false;
-      }
-      for (var i in _jsonData) {
-        LogModel _event = LogModel(
-            i["date_time"], i["event_type"], i["event_name"], i["_id"]);
-        events.add(_event);
-      }
-      if (_jsonData.length != 0) {
-        if (_jsonData[0]['verified'] && !_status) {
-          setState(() {
-            _status = true;
-          });
-        }
-      }
-      yield events;
-    }
-  }
-
   _getUser() async {
     sharedPreferences = await SharedPreferences.getInstance();
-    _user = sharedPreferences.getString('loggedUser');
-    _firstname = sharedPreferences.getString('firstname');
-    _lastname = sharedPreferences.getString('lastname');
+    print("this is token");
+    print(sharedPreferences.getString('token'));
+    setState(() {
+      _user = sharedPreferences.getString('loggedUser');
+      _firstname = sharedPreferences.getString('firstname');
+      _lastname = sharedPreferences.getString('lastname');
+      _status = sharedPreferences.getBool('status');
+    });
   }
 
   _logout() async {
@@ -177,23 +161,27 @@ class _ActivityState extends State<Activity> {
   void initState() {
     _loadFetchUrl();
     _getUser();
+    _loadImg();
+    _loadPost();
     super.initState();
   }
 
   @override
-  didChangeDependencies() async {
+  void dispose() {
+    _streamController.close();
+    super.dispose();
+  }
+
+  _loadImg() async {
     now = DateTime.now();
     sharedPreferences = await SharedPreferences.getInstance();
-    setState(() {
-      imgURL = sharedPreferences.getString("url") +
-          "profile_image/" +
-          sharedPreferences.getString("loggedUser") +
-          "?v=" +
-          now.millisecondsSinceEpoch.toString();
-      _status = sharedPreferences.getBool('status');
-    });
+    String url = sharedPreferences.getString("url") +
+        "profile_image/" +
+        sharedPreferences.getString("loggedUser") +
+        "?v=" +
+        now.millisecondsSinceEpoch.toString();
     image = Image.network(
-      imgURL,
+      url,
       loadingBuilder: (BuildContext context, Widget child,
           ImageChunkEvent loadingProgress) {
         if (loadingProgress == null) return child;
@@ -202,13 +190,75 @@ class _ActivityState extends State<Activity> {
     );
 
     precacheImage(image.image, context);
-    super.didChangeDependencies();
+  }
+
+  Color circleColor(String date) {
+    if (date == "Monday") {
+      return Colors.yellow[300];
+    }
+    if (date == "Tuesday") {
+      return Colors.pink[300];
+    }
+    if (date == "Wednesday") {
+      return Colors.green[300];
+    }
+    if (date == "Thursday") {
+      return Colors.orange[300];
+    }
+    if (date == "Friday") {
+      return Colors.blue[300];
+    }
+    if (date == "Saturday") {
+      return Colors.purple[300];
+    }
+    if (date == "Sunday") {
+      return Colors.red[300];
+    }
+  }
+
+  _showDialog() {
+    showDialog<String>(
+      context: context,
+      child: AlertDialog(
+        contentPadding: const EdgeInsets.all(16.0),
+        content: Row(
+          children: <Widget>[
+            Expanded(
+              child: TextField(
+                controller: widget.controller,
+                autofocus: false,
+                decoration:
+                    InputDecoration(labelText: 'Secret', hintText: 'eg. NxAqy'),
+              ),
+            )
+          ],
+        ),
+        actions: <Widget>[
+          FlatButton(
+              child: const Text('Back'),
+              onPressed: () {
+                Navigator.pop(context);
+              }),
+          FlatButton(
+              child: const Text('Join'),
+              onPressed: () {
+                setState(() {
+                  barcode = widget.controller.text;
+                });
+                eventDetail();
+                widget.controller.clear();
+                Navigator.pop(context);
+              })
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     Size size = MediaQuery.of(context).size;
     return Scaffold(
+        resizeToAvoidBottomInset: false,
         backgroundColor: Colors.white,
         key: _scaffoldKey,
         drawer: SafeArea(
@@ -264,6 +314,9 @@ class _ActivityState extends State<Activity> {
                         builder: (context) => Profile((value) {
                               setState(() {
                                 _update = value;
+                                if (_update) {
+                                  _loadImg();
+                                }
                               });
                             })));
               },
@@ -279,6 +332,17 @@ class _ActivityState extends State<Activity> {
                 scan(1);
               },
             ),
+            // ListTile(
+            //   leading: Icon(Icons.keyboard),
+            //   title: Text('Secret Key',
+            //       style: TextStyle(
+            //         fontSize: 18.0,
+            //         fontFamily: 'Oxygen',
+            //       )),
+            //   onTap: () {
+            //     _showDialog();
+            //   },
+            // ),
             if (_status)
               ListTile(
                 leading: Icon(Icons.radio_button_checked),
@@ -355,38 +419,38 @@ class _ActivityState extends State<Activity> {
                   ],
                 ),
               ),
-              if(!_status)
-              Flexible(
-                flex: 10,
-                child: Container(
-                  height: 50.0 * size.width / 350,
-                  color: Color(0xffababab),
-                  child: Stack(children: <Widget>[
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Padding(
-                          padding: EdgeInsets.only(right: 10.0),
-                          child: (_status)
-                              ? Icon(
-                                  Icons.done,
-                                  size: 40.0,
-                                  color: Colors.green,
-                                )
-                              : Icon(
-                                  Icons.clear,
-                                  size: 40.0,
-                                  color: Colors.red,
-                                )),
-                    )
-                  ]),
+              if (!_status)
+                Flexible(
+                  flex: 10,
+                  child: Container(
+                    height: 50.0 * size.width / 350,
+                    color: Color(0xffababab),
+                    child: Stack(children: <Widget>[
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Padding(
+                            padding: EdgeInsets.only(right: 10.0),
+                            child: (_status)
+                                ? Icon(
+                                    Icons.done,
+                                    size: 40.0,
+                                    color: Colors.green,
+                                  )
+                                : Icon(
+                                    Icons.clear,
+                                    size: 40.0,
+                                    color: Colors.red,
+                                  )),
+                      )
+                    ]),
+                  ),
                 ),
-              ),
               Flexible(
                 flex: 70,
                 child: Container(
                     color: Colors.white,
                     child: StreamBuilder(
-                        stream: fetchPost(),
+                        stream: _streamController.stream,
                         builder: (context, snapshot) {
                           if (snapshot.hasData) {
                             if (snapshot.data.length == 0) {
@@ -401,7 +465,9 @@ class _ActivityState extends State<Activity> {
                               );
                             } else {
                               return ListView.builder(
+                                itemCount: snapshot.data.length,
                                 itemBuilder: (BuildContext context, int index) {
+                                  var post = snapshot.data[index];
                                   return Container(
                                     color: Colors.white,
                                     child: Stack(
@@ -417,14 +483,54 @@ class _ActivityState extends State<Activity> {
                                                     color: Colors.white),
                                                 child: Stack(children: <Widget>[
                                                   Padding(
-                                                    padding:
-                                                        EdgeInsets.all(10.0),
+                                                    padding: EdgeInsets.only(
+                                                        left: 10.0),
                                                     child: Align(
-                                                        alignment:
-                                                            Alignment.topLeft,
+                                                      alignment:
+                                                          Alignment.centerLeft,
+                                                      child: Container(
+                                                        width: 70.0,
+                                                        height: 70.0,
+                                                        decoration: BoxDecoration(
+                                                            color: circleColor(
+                                                                post['date_time']
+                                                                    .substring(
+                                                                        11)),
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                                        50.0)),
+                                                        child: Center(
+                                                          child: Text(
+                                                            post['event_name']
+                                                                .substring(
+                                                                    0, 1),
+                                                            style: TextStyle(
+                                                                color: Colors
+                                                                    .white,
+                                                                fontFamily:
+                                                                    'Oxygen',
+                                                                fontSize: 50.0 *
+                                                                    size.width /
+                                                                    900),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  Padding(
+                                                    padding: EdgeInsets.only(
+                                                      top: 10.0,
+                                                      left: 100.0,
+                                                    ),
+                                                    child: Align(
+                                                        alignment: Alignment
+                                                            .centerLeft,
                                                         child: Text(
                                                           'Status : ',
                                                           style: TextStyle(
+                                                              color: Colors
+                                                                  .black54,
                                                               fontFamily:
                                                                   'Oxygen',
                                                               fontSize: 50.0 *
@@ -432,23 +538,19 @@ class _ActivityState extends State<Activity> {
                                                                   1100),
                                                         )),
                                                   ),
-                                                  Positioned(
-                                                    left: 80.0,
-                                                    child: Padding(
-                                                      padding: EdgeInsets.only(
-                                                          top: 5.0, left: 5.0),
+                                                  Padding(
+                                                    padding: EdgeInsets.only(
+                                                        top: 5.0, left: 175.0),
+                                                    child: Align(
+                                                      alignment:
+                                                          Alignment.centerLeft,
                                                       child: Container(
                                                         decoration: BoxDecoration(
-                                                            color: (snapshot
-                                                                        .data[
-                                                                            index]
-                                                                        .type ==
+                                                            color: (post[
+                                                                        'event_type'] ==
                                                                     "fail")
                                                                 ? Colors.red
-                                                                : (snapshot
-                                                                            .data[
-                                                                                index]
-                                                                            .type ==
+                                                                : (post['event_type'] ==
                                                                         "attended")
                                                                     ? Colors
                                                                         .green
@@ -463,9 +565,8 @@ class _ActivityState extends State<Activity> {
                                                                 EdgeInsets.all(
                                                                     5.0),
                                                             child: Text(
-                                                              snapshot
-                                                                  .data[index]
-                                                                  .type,
+                                                              post[
+                                                                  'event_type'],
                                                               style: TextStyle(
                                                                   fontSize: 50.0 *
                                                                       size
@@ -481,14 +582,14 @@ class _ActivityState extends State<Activity> {
                                                   ),
                                                   Padding(
                                                     padding: EdgeInsets.only(
-                                                        left: 10.0,
+                                                        left: 100.0,
                                                         bottom: 20.0),
                                                     child: Align(
                                                       alignment:
-                                                          Alignment.centerLeft,
+                                                          Alignment.bottomLeft,
                                                       child: Text(
-                                                          snapshot.data[index]
-                                                              .dateTime,
+                                                          post['date_time']
+                                                              .substring(0, 10),
                                                           style: TextStyle(
                                                               fontSize: 50.0 *
                                                                   size.width /
@@ -500,28 +601,30 @@ class _ActivityState extends State<Activity> {
                                                     ),
                                                   ),
                                                   Padding(
-                                                    padding:
-                                                        EdgeInsets.all(10.0),
+                                                    padding: EdgeInsets.only(
+                                                        left: 90.0,
+                                                        bottom: 10.0),
                                                     child: Align(
                                                       alignment:
-                                                          Alignment.bottomLeft,
+                                                          Alignment.topLeft,
                                                       child: Container(
-                                                          decoration: BoxDecoration(
-                                                              color:
-                                                                  Colors.orange,
-                                                              borderRadius:
-                                                                  BorderRadius
-                                                                      .circular(
-                                                                          40.0)),
                                                           child: Padding(
-                                                                         padding: EdgeInsets.all(10.0)   ,                                          child: Text(snapshot
-                                                                .data[index]
-                                                                .eventName,style: TextStyle(color: Colors.black,fontSize: 50.0 * size.width / 1100,fontFamily: 'Oxygen')),
-                                                          )),
+                                                        padding: EdgeInsets.all(
+                                                            10.0),
+                                                        child: Text(
+                                                            post['event_name'],
+                                                            style: TextStyle(
+                                                                color: Colors
+                                                                    .black,
+                                                                fontSize: 50.0 *
+                                                                    size.width /
+                                                                    800,
+                                                                fontFamily:
+                                                                    'Oxygen')),
+                                                      )),
                                                     ),
                                                   ),
-                                                  if (snapshot
-                                                          .data[index].type ==
+                                                  if (post['event_type'] ==
                                                       "fail")
                                                     Padding(
                                                       padding: EdgeInsets.only(
@@ -543,7 +646,7 @@ class _ActivityState extends State<Activity> {
                                                                             context) =>
                                                                         CustomDialog(
                                                                             barcode:
-                                                                                snapshot.data[index].id));
+                                                                                post['_id']));
                                                               },
                                                               child: Padding(
                                                                 padding:
@@ -559,10 +662,10 @@ class _ActivityState extends State<Activity> {
                                                                               context)
                                                                           .size
                                                                           .width /
-                                                                      500,
-                                                                  color: (snapshot.data[index].type ==
+                                                                      400,
+                                                                  color: (post['event_type'] ==
                                                                               "attended" ||
-                                                                          snapshot.data[index].type ==
+                                                                          post['event_type'] ==
                                                                               "waiting")
                                                                       ? Colors
                                                                           .transparent
@@ -580,7 +683,6 @@ class _ActivityState extends State<Activity> {
                                     ),
                                   );
                                 },
-                                itemCount: snapshot.data.length,
                               );
                             }
                           } else {
@@ -615,7 +717,7 @@ class _ActivityState extends State<Activity> {
 
   Future<Widget> eventDetail() async {
     var payload = {
-      "eventKey": barcode,
+      "eventKey": secretKey,
       "username": sharedPreferences.getString("loggedUser")
     };
     var response = await http.post(scanURL,
@@ -683,7 +785,6 @@ class _ActivityState extends State<Activity> {
   }
 
   Future verified() async {
-    //send waiter objectID && logged username
     var payload = {"waiter": barcode};
     var response = await http.post(verifiedURL,
         body: jsonEncode(payload),
@@ -706,17 +807,55 @@ class _ActivityState extends State<Activity> {
     }
   }
 
+  bool checkQR() {
+    try {
+      secretKey = this.barcode.substring(0, 5);
+      DateTime time = DateTime.parse(barcode.substring(6));
+      DateTime now = DateTime.now();
+      if (now.difference(time).inSeconds > 10) {
+        return false;
+      } else {
+        return true;
+      }
+    } catch (e) {
+      return false;
+    }
+  }
+
   scan(int option) async {
     try {
       String barcode = await BarcodeScanner.scan();
       setState(() {
         this.barcode = barcode;
       });
-      if (option == 1) {
-        eventDetail();
-      }
-      if (option == 2) {
-        verified();
+      switch (option) {
+        case 1:
+          {
+            if (checkQR()) {
+              eventDetail();
+            } else {
+              showDialog(
+                context: context,
+                child: CupertinoAlertDialog(
+                    title: Text("Alert"),
+                    content: Text("QRCode has expired."),
+                    actions: [
+                      CupertinoDialogAction(
+                        child: Text("Got it"),
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                        },
+                      ),
+                    ]),
+              );
+            }
+          }
+          break;
+        case 2:
+          {
+            verified();
+          }
+          break;
       }
     } on PlatformException catch (e) {
       if (e.code == BarcodeScanner.CameraAccessDenied) {
@@ -729,5 +868,20 @@ class _ActivityState extends State<Activity> {
     } catch (e) {
       // Unknown error.
     }
+  }
+}
+
+class _SystemPadding extends StatelessWidget {
+  final Widget child;
+
+  _SystemPadding({Key key, this.child}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    var mediaQuery = MediaQuery.of(context);
+    return AnimatedContainer(
+        //padding: mediaQuery.viewInsets,
+        duration: const Duration(milliseconds: 300),
+        child: child);
   }
 }

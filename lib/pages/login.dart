@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert' as convert;
 import 'package:lmao/pages/register.dart';
+import 'package:lmao/pages/slideRightRoute.dart';
 
 class Login extends StatefulWidget {
   @override
@@ -154,8 +155,7 @@ class _LoginState extends State<Login> {
                       onTap: () {
                         Navigator.push(
                             context,
-                            MaterialPageRoute(
-                                builder: (context) => Register()));
+                            SlideRightRoute(page: Register()));
                       },
                       child: Text(
                         "Don't have an account?",
